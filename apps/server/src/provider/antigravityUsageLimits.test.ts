@@ -52,6 +52,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
     summary?: unknown;
     models?: unknown;
     summaryStatus?: number;
+    summaries?: Array<{ body: unknown; status?: number }>;
     tokenStatus?: number;
     refreshToken?: string;
     /** Google account id from userinfo; omit to make userinfo fail. */
@@ -104,10 +105,17 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
         );
       }
       expect(JSON.parse(body)).toEqual({ project: "project-id" });
+      expect(request.headers["user-agent"]).toMatch(/^antigravity\/cli\/1\.4\.0 /);
+      expect(request.url.startsWith("https://daily-cloudcode-pa.googleapis.com/")).toBe(true);
+      const nextSummary = request.url.endsWith(":retrieveUserQuotaSummary")
+        ? options.summaries?.shift()
+        : undefined;
       return HttpClientResponse.fromWeb(
         request,
         request.url.endsWith(":retrieveUserQuotaSummary")
-          ? Response.json(options.summary ?? summary, { status: options.summaryStatus ?? 200 })
+          ? Response.json(nextSummary?.body ?? options.summary ?? summary, {
+              status: nextSummary?.status ?? options.summaryStatus ?? 200,
+            })
           : Response.json(options.models ?? { models: {} }),
       );
     }),
@@ -145,6 +153,68 @@ describe("Antigravity subscription limits", () => {
         requests.filter((request) => request.url.endsWith(":retrieveUserQuotaSummary")),
       ).toHaveLength(2);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "reports CLI Gemini quotas for both idle accounts and Argon only for the entitled account",
+    () =>
+      Effect.gen(function* () {
+        const first = yield* fixture({
+          userId: "account-a",
+          summary: {
+            groups: [
+              {
+                buckets: [
+                  { bucketId: "gemini-weekly", remainingFraction: 0.992 },
+                  { bucketId: "gemini-5h", remainingFraction: 0.972 },
+                  { bucketId: "3p-weekly", remainingFraction: 0.507 },
+                  { bucketId: "3p-5h", remainingFraction: 1 },
+                  { bucketId: "gemini-argon-wtu-weekly", remainingFraction: 1 },
+                ],
+              },
+            ],
+          },
+        });
+        const second = yield* fixture({ userId: "account-b" });
+        const a = yield* first.probe;
+        const b = yield* second.probe;
+        expect(a.credentialFingerprint).not.toBe(b.credentialFingerprint);
+        expect(a.windows).toHaveLength(5);
+        expect(b.windows).toHaveLength(4);
+        expect(a.windows.find((window) => window.id === "gemini-weekly")?.usedPercent).toBeCloseTo(
+          0.8,
+        );
+        expect(a.windows.find((window) => window.id === "gemini-5h")?.usedPercent).toBeCloseTo(2.8);
+        expect(a.windows.find((window) => window.id === "gemini-argon-wtu-weekly")).toMatchObject({
+          label: "Gemini Argon WTU · Weekly",
+          usedPercent: 0,
+        });
+        expect(b.windows.some((window) => window.id.includes("argon"))).toBe(false);
+        expect((yield* first.probe).windows).toEqual(a.windows);
+        expect((yield* second.probe).windows).toEqual(b.windows);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "reports probe failure on a temporary summary error instead of replacing CLI quotas with another source",
+    () =>
+      Effect.gen(function* () {
+        const { probe, requests } = yield* fixture({
+          summaries: [{ body: summary }, { body: {}, status: 503 }, { body: summary }],
+          models: { models: { "gemini-a": { quotaInfo: { remainingFraction: 1 } } } },
+        });
+        expect((yield* probe).windows).toHaveLength(4);
+        expect((yield* probe).unavailable?.reason).toBe("probeFailed");
+        expect((yield* probe).windows).toHaveLength(4);
+        expect(
+          requests.filter((request) => request.url.endsWith(":fetchAvailableModels")),
+        ).toHaveLength(0);
+        expect(
+          requests.every(
+            (request) => !request.url.startsWith("https://cloudcode-pa.googleapis.com"),
+          ),
+        ).toBe(true);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect("labels an account's extra Gemini pool as its own row and keeps the generic rows", () =>
@@ -259,7 +329,7 @@ describe("Antigravity subscription limits", () => {
   it.effect("falls back to model quotas without inventing a window duration", () =>
     Effect.gen(function* () {
       const { probe } = yield* fixture({
-        summaryStatus: 404,
+        summary: { groups: [] },
         models: {
           models: {
             "gemini-a": {

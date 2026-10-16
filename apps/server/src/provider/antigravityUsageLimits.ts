@@ -15,10 +15,8 @@ import {
   makeUsageLimits,
 } from "@t3tools/provider-core/server/usageLimits";
 
-const ENDPOINTS = [
-  "https://daily-cloudcode-pa.googleapis.com",
-  "https://cloudcode-pa.googleapis.com",
-];
+// CLI quotas live on daily; the other host reports different allowances for the same account.
+const ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
 const MANUAL_REDIRECT: RequestInit = { redirect: "manual" };
 const TokenFile = Schema.Struct({
   client_id: Schema.NonEmptyString,
@@ -271,34 +269,26 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
       accessToken = cached.accessToken;
       account = cached.account;
     }
-    const fetchWindows = Effect.fn("AntigravityUsageProbe.fetchWindows")(function* <E>(
-      operation: string,
-      parse: (response: unknown) => Effect.Effect<ServerProviderUsageWindow[], E>,
-    ) {
-      for (const endpoint of ENDPOINTS) {
-        const windows = yield* request(
-          HttpClientRequest.post(`${endpoint}/v1internal:${operation}`).pipe(
-            HttpClientRequest.setHeaders({
-              Authorization: `Bearer ${accessToken}`,
-              "User-Agent": `antigravity/hub/1.0.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`,
-            }),
-            HttpClientRequest.bodyJsonUnsafe(token.project_id ? { project: token.project_id } : {}),
-          ),
-        ).pipe(
-          Effect.flatMap(parse),
-          Effect.orElseSucceed(() => []),
-        );
-        if (windows.length > 0) return windows;
-      }
-      return [];
-    });
-    const summary = yield* fetchWindows("retrieveUserQuotaSummary", (response) =>
-      decodeSummary(response).pipe(Effect.map(summaryWindows)),
+    const fetchQuota = (operation: string) =>
+      request(
+        HttpClientRequest.post(`${ENDPOINT}/v1internal:${operation}`).pipe(
+          HttpClientRequest.setHeaders({
+            Authorization: `Bearer ${accessToken}`,
+            // The hub profile suppresses Gemini and Argon buckets even for entitled accounts.
+            "User-Agent": `antigravity/cli/1.4.0 (aidev_client; os_type=${platform}; arch=${architecture === "x64" ? "amd64" : architecture})`,
+          }),
+          HttpClientRequest.bodyJsonUnsafe(token.project_id ? { project: token.project_id } : {}),
+        ),
+      );
+    const summary = yield* fetchQuota("retrieveUserQuotaSummary").pipe(
+      Effect.flatMap(decodeSummary),
+      Effect.map(summaryWindows),
     );
     const windows = summary.length
       ? summary
-      : yield* fetchWindows("fetchAvailableModels", (response) =>
-          decodeModels(response).pipe(Effect.map(modelWindows)),
+      : yield* fetchQuota("fetchAvailableModels").pipe(
+          Effect.flatMap(decodeModels),
+          Effect.map(modelWindows),
         );
     if (windows.length === 0) {
       return makeUnavailableUsageLimits({

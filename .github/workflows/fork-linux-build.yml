@@ -55,6 +55,8 @@ jobs:
           apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts
           packages/provider-acp/src/server
           packages/contracts/src/settings.test.ts
+          packages/provider-core/src/server/usageLimits.test.ts
+          packages/shared/src/usageLimits.test.ts
           apps/web/src/components/settings/ProviderSettingsForm.test.ts
 
   archive:
