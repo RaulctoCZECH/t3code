@@ -808,12 +808,23 @@ export const AntigravitySettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "Automatic", clearWhenEmpty: "persist" },
       }),
     ),
+    acpClientName: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "ACP client name",
+        description:
+          "Replaces the client name T3 Code sends to the Antigravity agent. Google lists non-Gemini models only for clients it recognizes, and this name is also sent to Google. Naming another client misidentifies T3 Code and may breach Antigravity's terms. Leave empty unless you accept that risk.",
+        providerSettingsForm: { placeholder: "Default (t3-code)", clearWhenEmpty: "omit" },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
-  { order: ["authMethod", "apiKey", "gcpProject", "gcpLocation", "binaryPath"] },
+  {
+    order: ["authMethod", "apiKey", "gcpProject", "gcpLocation", "binaryPath", "acpClientName"],
+  },
 );
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 

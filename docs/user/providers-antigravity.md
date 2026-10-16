@@ -72,6 +72,12 @@ The model list comes from your Antigravity account and can differ from other
 Antigravity apps. A resumed thread keeps its selected model. If access to that
 model ends, select another available model before continuing.
 
+Google lists Claude and GPT-OSS models only for clients it recognizes, so T3 Code
+may show Gemini models alone even when your plan includes more. **ACP client name** in
+the instance settings replaces the name T3 Code sends to the agent. It is empty by
+default. Naming another client misidentifies T3 Code, the name is also sent to Google,
+and doing so may breach Antigravity's terms and put the account at risk.
+
 Use Antigravity's native `/plan` command for planning. T3 Code's separate Plan mode
 is unavailable. Tool approvals follow [Permission modes](./permission-modes.md).
 Questions with fixed choices still need one of the offered answers, even in
@@ -127,7 +133,9 @@ is refused while the runtime is in use.
 
 Open **Usage > Limits** to see the remaining Gemini and shared Claude/GPT allowances
 for Google sign-ins. Each group has separate five-hour and weekly limits and reset
-times. Limits refresh with provider status and include usage outside T3 Code.
+times. An account can have extra limits, such as one for a single model line, and
+different accounts can have different ones. Only the limits Google reports for an
+account are shown. Limits refresh with provider status and include usage outside T3 Code.
 
 A server restart keeps your Google sign-in. The provider shows the saved account
 until a session, a refresh, or a sign-out reports something new.

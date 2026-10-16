@@ -1,0 +1,115 @@
+name: Fork Linux release build
+
+on:
+  push:
+    branches: [build/antigravity-v0.1.0]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-linux-build
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - name: Check production base
+        run: git merge-base --is-ancestor v0.1.0 HEAD
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+      - name: Ensure Electron types and runtime
+        run: vp run --filter @t3tools/desktop ensure:electron
+      - name: Complete workspace typecheck
+        run: vp run typecheck
+      - name: Lint
+        run: vp run lint
+      - name: Relevant server, ACP, contracts and web tests
+        run: >-
+          vp test run
+          apps/server/src/provider/Drivers/AntigravityDriver.test.ts
+          apps/server/src/provider/Drivers/AntigravitySkills.test.ts
+          apps/server/src/provider/Drivers/antigravityUsageReader.test.ts
+          apps/server/src/provider/antigravityUsageLimits.test.ts
+          apps/server/src/provider/AntigravityProvider.test.ts
+          apps/server/src/provider/AntigravityAuth.test.ts
+          apps/server/src/provider/antigravityAuthSupport.test.ts
+          apps/server/src/provider/antigravityCallback.test.ts
+          apps/server/src/provider/acp/AntigravityAcpSupport.test.ts
+          apps/server/src/provider/acp/AntigravityProtocol.test.ts
+          apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts
+          packages/provider-acp/src/server
+          packages/contracts/src/settings.test.ts
+          apps/web/src/components/settings/ProviderSettingsForm.test.ts
+
+  archive:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      T3CODE_RELAY_URL: https://relay.t3.codes
+      T3CODE_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsudDMuY29kZXMk
+      VITE_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsudDMuY29kZXMk
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: hzxSgY2cH10sDU2r
+      T3CODE_WEB_SOURCEMAP: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+      - name: Set fork release version
+        run: |
+          version="0.1.0-raulcto.${GITHUB_SHA:0:12}"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          node scripts/update-release-package-versions.ts "$version"
+      - name: Production web and server build
+        run: vp run --filter t3 build
+      - name: Build resource monitor
+        run: |
+          cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml
+          mkdir -p "$RUNNER_TEMP/cli-resource-monitor/linux-x64"
+          cp native/resource-monitor/target/release/t3-resource-monitor "$RUNNER_TEMP/cli-resource-monitor/linux-x64/"
+      - name: Build single executable
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+      - name: Package complete Linux x64 archive
+        run: |
+          node scripts/build-cli-archive.ts --platform linux --arch x64 --version "$RELEASE_VERSION" --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" --output-dir release-cli
+          node scripts/smoke-cli-archive.ts --archive release-cli/*.tar.gz --expect-version "$RELEASE_VERSION"
+      - name: Audit archive and write checksums
+        run: |
+          python3 scripts/audit-fork-archive.py release-cli/*.tar.gz
+          cd release-cli
+          sha256sum *.tar.gz > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-x64-release
+          path: release-cli/
+          if-no-files-found: error
+          retention-days: 14

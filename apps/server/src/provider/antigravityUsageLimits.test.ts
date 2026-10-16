@@ -147,6 +147,81 @@ describe("Antigravity subscription limits", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("labels an account's extra Gemini pool as its own row and keeps the generic rows", () =>
+    Effect.gen(function* () {
+      const { probe } = yield* fixture({
+        summary: {
+          buckets: [
+            { bucketId: "gemini-weekly", window: "weekly", remainingFraction: 1 },
+            { bucketId: "gemini-5h", window: "5h", remainingFraction: 0.5 },
+            { bucketId: "gemini-argon-wtu-weekly", window: "weekly", remainingFraction: 0.25 },
+          ],
+        },
+      });
+      const limits = yield* probe;
+      expect(
+        Object.fromEntries(
+          limits.windows.map((window) => [window.id, [window.label, window.usedPercent]]),
+        ),
+      ).toEqual({
+        "gemini-weekly": ["Gemini · Weekly", 0],
+        "gemini-5h": ["Gemini · 5-hour", 50],
+        "gemini-argon-wtu-weekly": ["Gemini Argon WTU · Weekly", 75],
+      });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("takes the window length from the bucket id when the bucket omits it", () =>
+    Effect.gen(function* () {
+      const { probe } = yield* fixture({
+        summary: {
+          buckets: [
+            { bucketId: "gemini-argon-wtu-weekly", remainingFraction: 0.4 },
+            { bucketId: "gemini-5h", remainingFraction: 0.4 },
+            { bucketId: "gemini-other-pool", displayName: "Burst", remainingFraction: 0.4 },
+          ],
+        },
+      });
+      const byId = new Map((yield* probe).windows.map((window) => [window.id, window]));
+      expect(byId.get("gemini-argon-wtu-weekly")).toMatchObject({
+        kind: "weekly",
+        windowDurationMins: 10080,
+      });
+      expect(byId.get("gemini-5h")).toMatchObject({ kind: "session", windowDurationMins: 300 });
+      expect(byId.get("gemini-other-pool")).toMatchObject({
+        label: "Gemini Other Pool · Burst",
+        kind: "other",
+      });
+      expect(byId.get("gemini-other-pool")?.windowDurationMins).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reports only the buckets each account returns, without placeholders", () =>
+    Effect.gen(function* () {
+      const withPool = yield* fixture({
+        summary: {
+          buckets: [
+            { bucketId: "gemini-weekly", window: "weekly", remainingFraction: 1 },
+            { bucketId: "gemini-argon-wtu-weekly", window: "weekly", remainingFraction: 0.5 },
+          ],
+        },
+      });
+      const withoutPool = yield* fixture({
+        summary: {
+          buckets: [{ bucketId: "gemini-weekly", window: "weekly", remainingFraction: 0.9 }],
+        },
+      });
+      const first = yield* withPool.probe;
+      const second = yield* withoutPool.probe;
+      expect(first.windows.map((window) => window.id).toSorted()).toEqual([
+        "gemini-argon-wtu-weekly",
+        "gemini-weekly",
+      ]);
+      expect(second.windows.map((window) => window.id)).toEqual(["gemini-weekly"]);
+      expect(second.unavailable).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("re-reads changed credentials and clears cached access after sign-out", () =>
     Effect.gen(function* () {
       const { probe, clear, requests, writeToken, tokenPath } = yield* fixture();

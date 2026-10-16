@@ -386,6 +386,32 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
   );
 
   it.effect.skipIf(windowsHost)(
+    "sends the configured ACP client name, keeps the version, and leaves it unset by default",
+    () =>
+      Effect.gen(function* () {
+        const named = yield* makeHarness({ config: { acpClientName: "example-client" } });
+        yield* named.refresh();
+        const namedInitialize = (yield* named.readRequests).find(
+          (request) => request.method === "initialize",
+        );
+        expect(namedInitialize?.params?.clientInfo).toEqual({
+          name: "example-client",
+          version: "0.0.0",
+        });
+
+        const plain = yield* makeHarness();
+        yield* plain.refresh();
+        const plainInitialize = (yield* plain.readRequests).find(
+          (request) => request.method === "initialize",
+        );
+        expect(plainInitialize?.params?.clientInfo).toEqual({
+          name: "t3-code-provider-setup",
+          version: "0.0.0",
+        });
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect.skipIf(windowsHost)(
     "authenticates with the configured API key method and labels the account by method",
     () =>
       Effect.gen(function* () {

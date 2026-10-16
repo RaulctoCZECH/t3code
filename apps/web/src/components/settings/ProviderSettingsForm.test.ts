@@ -82,6 +82,7 @@ describe("ProviderSettingsForm helpers", () => {
       "gcpProject",
       "gcpLocation",
       "binaryPath",
+      "acpClientName",
     ]);
     const authMethod = fields.find((field) => field.key === "authMethod");
     expect(authMethod).toMatchObject({ control: "select", clearWhenEmpty: "omit" });

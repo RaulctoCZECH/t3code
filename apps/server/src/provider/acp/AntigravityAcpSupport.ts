@@ -90,6 +90,19 @@ export const makeAntigravityAcpRuntime = Effect.fn("makeAntigravityAcpRuntime")(
   return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(Effect.provide(context));
 });
 
+/**
+ * Chat, sign-in, model refresh, and text runtimes all start through the driver, so applying the
+ * name here keeps one instance from presenting different identities to the agent. The version is
+ * left alone; only the name was asked for.
+ */
+export function withAntigravityClientName<
+  T extends { readonly clientInfo: { readonly name: string } },
+>(input: T, clientName: string): T {
+  return clientName === ""
+    ? input
+    : { ...input, clientInfo: { ...input.clientInfo, name: clientName } };
+}
+
 export function antigravityPermissionMode(runtimeMode: RuntimeMode): string {
   switch (runtimeMode) {
     case "full-access":

@@ -96,6 +96,30 @@ function quotaWindow(
   };
 }
 
+const BUCKET_FAMILIES = [
+  { prefix: "gemini-", label: "Gemini" },
+  { prefix: "3p-", label: "Claude & GPT (shared)" },
+] as const;
+
+/**
+ * Accounts can own extra buckets, such as a pool for one model line, and the set differs per
+ * account. The id carries the window as a suffix and any narrower pool in between. The pool is
+ * only reformatted for display, so no meaning is guessed from its name.
+ */
+function describeBucket(bucketId: string) {
+  const family = BUCKET_FAMILIES.find((entry) => bucketId.startsWith(entry.prefix));
+  const rest = family ? bucketId.slice(family.prefix.length) : bucketId;
+  const suffix = /(?:^|-)(5h|weekly)$/.exec(rest);
+  const pool = (suffix ? rest.slice(0, rest.length - suffix[0].length) : rest)
+    .split("-")
+    .filter(Boolean)
+    .map((word) =>
+      word.length <= 3 ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+  return { family: family?.label, pool: family ? pool : "", window: suffix?.[1] };
+}
+
 /** The summary names the actual shared buckets; Claude and GPT consume one allowance. */
 function summaryWindows(summary: typeof Summary.Type) {
   const windows = new Map<string, ServerProviderUsageWindow>();
@@ -105,16 +129,15 @@ function summaryWindows(summary: typeof Summary.Type) {
   for (const group of groups ?? []) {
     for (const bucket of group.buckets ?? []) {
       if (bucket.disabled) continue;
-      const family = bucket.bucketId.startsWith("gemini-")
-        ? "Gemini"
-        : bucket.bucketId.startsWith("3p-")
-          ? "Claude & GPT (shared)"
-          : group.displayName?.trim() || bucket.bucketId;
-      const weekly = bucket.window === "weekly";
-      const session = bucket.window === "5h";
+      const described = describeBucket(bucket.bucketId);
+      const family = described.family ?? (group.displayName?.trim() || bucket.bucketId);
+      const heading = described.pool ? `${family} ${described.pool}` : family;
+      const windowName = bucket.window ?? described.window;
+      const weekly = windowName === "weekly";
+      const session = windowName === "5h";
       const window = quotaWindow(
         bucket.bucketId,
-        `${family} · ${weekly ? "Weekly" : session ? "5-hour" : bucket.displayName?.trim() || "Quota"}`,
+        `${heading} · ${weekly ? "Weekly" : session ? "5-hour" : bucket.displayName?.trim() || "Quota"}`,
         bucket,
         weekly ? "weekly" : session ? "session" : "other",
         weekly ? 7 * 24 * 60 : session ? 5 * 60 : undefined,

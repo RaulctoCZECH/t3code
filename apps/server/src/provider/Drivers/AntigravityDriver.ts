@@ -40,6 +40,7 @@ import {
 } from "../antigravityAuthSupport.ts";
 import {
   makeAntigravityAcpRuntime,
+  withAntigravityClientName,
   type AntigravityAcpRuntimeInput,
 } from "../acp/AntigravityAcpSupport.ts";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -242,7 +243,7 @@ export const AntigravityDriver: ProviderDriver<
               ),
         );
         const runtime = yield* makeAntigravityAcpRuntime({
-          ...input,
+          ...withAntigravityClientName(input, settings.acpClientName),
           authMethod: auth.authMethod,
           childProcessSpawner: spawner,
           spawn: buildAntigravityAcpSpawnInput({
