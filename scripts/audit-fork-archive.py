@@ -15,7 +15,8 @@ with tarfile.open(sys.argv[1], "r:gz") as archive:
     assert required <= names, "Archive missing runtime files"
     assert any(name.endswith(".node") for name in names), "Missing native modules"
     forbidden = {".git", ".t3", ".env", ".npmrc", "AUDIT.md", "secrets", "credentials.json", "settings.json"}
-    patterns = [rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    # Node/OpenSSL embeds PEM delimiter strings without key material.
+    patterns = [rb"-----BEGIN (?P<key_kind>(?:RSA |EC |OPENSSH )?PRIVATE KEY)-----[ \t]*\r?\n[A-Za-z0-9+/=\r\n]{40,}-----END (?P=key_kind)-----",
                 rb"gh[pousr]_[A-Za-z0-9]{30,}", rb"github_pat_[A-Za-z0-9_]{40,}",
                 rb"ya29\.[A-Za-z0-9_-]{30,}", rb"1//[A-Za-z0-9_-]{40,}"]
     for entry in entries:
@@ -26,5 +27,7 @@ with tarfile.open(sys.argv[1], "r:gz") as archive:
         assert not entry.name.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm", ".db", ".pem", ".p12", ".p8")), "Private data extension"
         if entry.isfile():
             data = archive.extractfile(entry).read()
-            assert not any(re.search(pattern, data) for pattern in patterns), "Credential pattern found"
+            scan_data = data.replace(b"\\n", b"\n")
+            for index, pattern in enumerate(patterns):
+                assert not re.search(pattern, scan_data), f"Credential pattern {index} found in {entry.name}"
     print(f"Archive audit passed: {len(entries)} entries; runtime files present; no private data or credential patterns found")
