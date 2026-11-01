@@ -89,7 +89,7 @@ export const makeAntigravityAcpRuntime = Effect.fn("makeAntigravityAcpRuntime")(
  * name here keeps one instance from presenting different identities to the agent. The version is
  * left alone; only the name was asked for.
  */
-export function withAntigravityClientName<
+function withAntigravityClientName<
   T extends { readonly clientInfo: { readonly name: string } },
 >(input: T, clientName: string): T {
   return clientName === ""
