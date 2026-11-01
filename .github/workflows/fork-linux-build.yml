@@ -2,7 +2,7 @@ name: Fork Linux release build
 
 on:
   push:
-    branches: [build/antigravity-v0.1.0]
+    branches: ["build/antigravity-v0.1.0", "update/antigravity-main-**"]
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
       - name: Check production base
-        run: git merge-base --is-ancestor 81493efb71e8e8244f95d3e9f71d8369654ab151 HEAD
+        run: git merge-base --is-ancestor 82b10d546c1041d8eff40425f076d61f608d518f HEAD
       - uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
@@ -39,6 +39,8 @@ jobs:
         run: vp run typecheck
       - name: Lint
         run: vp run lint
+      - name: Knip
+        run: vp run knip:check
       - name: Relevant server, ACP, contracts and web tests
         run: >-
           vp test run
@@ -83,7 +85,8 @@ jobs:
           run-install: true
       - name: Set fork release version
         run: |
-          version="0.1.0-raulcto.${GITHUB_SHA:0:12}"
+          base_version=$(node -p "JSON.parse(require('fs').readFileSync('apps/server/package.json', 'utf8')).version")
+          version="${base_version%%-*}-raulcto.${GITHUB_SHA:0:12}"
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           node scripts/update-release-package-versions.ts "$version"
       - name: Production web and server build

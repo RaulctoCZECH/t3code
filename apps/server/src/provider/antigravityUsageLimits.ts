@@ -17,6 +17,10 @@ import {
 
 // CLI quotas live on daily; the other host reports different allowances for the same account.
 const ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
+const SUMMARY_WINDOW_MINS = new Map([
+  ["5h", 5 * 60],
+  ["weekly", 7 * 24 * 60],
+]);
 const MANUAL_REDIRECT: RequestInit = { redirect: "manual" };
 const TokenFile = Schema.Struct({
   client_id: Schema.NonEmptyString,
@@ -38,6 +42,7 @@ const Bucket = Schema.Struct({
   bucketId: Schema.NonEmptyString,
   window: Schema.optional(Schema.String),
   displayName: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
   disabled: Schema.optional(Schema.Boolean),
 });
 const Summary = Schema.Struct({
@@ -118,8 +123,22 @@ function describeBucket(bucketId: string) {
   return { family: family?.label, pool: family ? pool : "", window: suffix?.[1] };
 }
 
-/** The summary names the actual shared buckets; Claude and GPT consume one allowance. */
-function summaryWindows(summary: typeof Summary.Type) {
+function summaryResetTime(
+  bucket: typeof Bucket.Type,
+  windowDurationMins: number | undefined,
+  requestedAt: number,
+): string | undefined {
+  // Untouched summary buckets report a rolling full-window reset.
+  const untouched =
+    bucket.remainingFraction === 1 &&
+    bucket.description === undefined &&
+    windowDurationMins !== undefined &&
+    Math.abs(Date.parse(bucket.resetTime ?? "") - requestedAt - windowDurationMins * 60_000) <=
+      60_000;
+  return untouched ? undefined : bucket.resetTime;
+}
+
+function summaryWindows(summary: typeof Summary.Type, requestedAt: number) {
   const windows = new Map<string, ServerProviderUsageWindow>();
   const groups = summary.groups?.some((group) => group.buckets?.length)
     ? summary.groups
@@ -133,12 +152,13 @@ function summaryWindows(summary: typeof Summary.Type) {
       const windowName = bucket.window ?? described.window;
       const weekly = windowName === "weekly";
       const session = windowName === "5h";
+      const windowDurationMins = SUMMARY_WINDOW_MINS.get(windowName ?? "");
       const window = quotaWindow(
         bucket.bucketId,
         `${heading} · ${weekly ? "Weekly" : session ? "5-hour" : bucket.displayName?.trim() || "Quota"}`,
-        bucket,
+        { ...bucket, resetTime: summaryResetTime(bucket, windowDurationMins, requestedAt) },
         weekly ? "weekly" : session ? "session" : "other",
-        weekly ? 7 * 24 * 60 : session ? 5 * 60 : undefined,
+        windowDurationMins,
       );
       if (window) windows.set(window.id, window);
     }
@@ -179,7 +199,6 @@ function modelWindows(models: typeof Models.Type) {
   return [...windows.values()];
 }
 
-/** Reads this instance's Google profile, with a memory-only access token and no credential writes. */
 export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(function* (input: {
   readonly profileDirectory: string;
   readonly authMethod: AntigravitySettings["authMethod"];
@@ -246,8 +265,7 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
         ),
       ).pipe(Effect.flatMap(decodeTokenResponse));
       accessToken = refreshed.access_token;
-      // Each machine's sign-in has its own refresh token, so the Google
-      // account id is what lets clients merge one account across environments.
+      // Use Google account IDs to merge accounts across environments; refresh tokens differ per machine.
       account = yield* request(
         HttpClientRequest.get("https://www.googleapis.com/oauth2/v2/userinfo").pipe(
           HttpClientRequest.setHeaders({ Authorization: `Bearer ${accessToken}` }),
@@ -280,9 +298,10 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
           HttpClientRequest.bodyJsonUnsafe(token.project_id ? { project: token.project_id } : {}),
         ),
       );
+    const requestedAt = yield* Clock.currentTimeMillis;
     const summary = yield* fetchQuota("retrieveUserQuotaSummary").pipe(
       Effect.flatMap(decodeSummary),
-      Effect.map(summaryWindows),
+      Effect.map((summary) => summaryWindows(summary, requestedAt)),
     );
     const windows = summary.length
       ? summary
