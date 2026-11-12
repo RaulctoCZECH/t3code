@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 
 # Scan the bytes represented by embedded assets, rather than random base64 text.
 DATA_URI = re.compile(rb"data:[^\s\"'`<>;,]+(?:;[^\s\"'`<>,;]+)*;base64,([A-Za-z0-9+/=]+)")
+BASE64_BLOB = re.compile(rb"(?<![A-Za-z0-9_.-])([A-Za-z0-9+/]{128,}={0,2})(?![A-Za-z0-9_.-])")
 
 
 def credential_payloads(data):
@@ -22,6 +23,7 @@ def credential_payloads(data):
         return b""
 
     text = DATA_URI.sub(replace_asset, data)
+    text = BASE64_BLOB.sub(replace_asset, text)
     yield from decoded
     yield text.replace(b"\\n", b"\n")
 

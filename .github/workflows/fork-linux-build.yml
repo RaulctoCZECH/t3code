@@ -75,6 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           sparse-checkout: |
             /*
             !/.repos/
@@ -86,8 +87,11 @@ jobs:
           run-install: true
       - name: Set fork release version
         run: |
-          base_version=$(node -p "JSON.parse(require('fs').readFileSync('apps/server/package.json', 'utf8')).version")
-          version="${base_version%%-*}-raulcto.${GITHUB_SHA:0:12}"
+          git fetch --quiet --force --tags https://github.com/pingdotgg/t3code.git
+          pkg_version=$(node -p "JSON.parse(require('fs').readFileSync('apps/server/package.json', 'utf8')).version.split('-')[0]")
+          tag_version=$(git tag --merged HEAD --list 'v*' | sed -nE 's/^v([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | sort -V | tail -n1)
+          base_version=$(printf '%s\n%s\n' "$pkg_version" "$tag_version" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          version="${base_version}-raulcto.${GITHUB_SHA:0:12}"
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           node scripts/update-release-package-versions.ts "$version"
       - name: Production web and server build
