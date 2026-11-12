@@ -66,7 +66,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
     userId?: string;
     userInfoAt?: number;
     missingToken?: boolean;
-    authMethod?: "oauth-personal" | "gemini-api-key";
+    authMethod?: "oauth-personal" | "oauth-business" | "gemini-api-key";
   } = {},
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -488,7 +488,43 @@ describe("Antigravity subscription limits", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
-  it.effect("labels Argon's weekly quota apart from the default Gemini weekly quota", () =>
+  // Oracle: reported payloads for a personal sign-in, whose runtime meters on the daily endpoint.
+  it.effect("reports a personal account's quota from the daily endpoint it is metered on", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-07T12:00:00Z")));
+      const argon = (remainingFraction: number, resetTime: string) => ({
+        groups: [
+          {
+            displayName: "Gemini 4 Argon",
+            buckets: [
+              {
+                bucketId: "gemini-argon-wtu-weekly",
+                window: "weekly",
+                remainingFraction,
+                resetTime,
+              },
+            ],
+          },
+        ],
+      });
+      const { probe } = yield* fixture({
+        authMethod: "oauth-personal",
+        summaryByHost: {
+          "daily-cloudcode-pa.googleapis.com": argon(0.8623059, "2026-11-14T08:41:35Z"),
+          "cloudcode-pa.googleapis.com": argon(0, "2026-11-08T18:27:14Z"),
+        },
+      });
+      expect((yield* probe).windows).toEqual([
+        expect.objectContaining({
+          id: "gemini-argon-wtu-weekly",
+          usedPercent: expect.closeTo(13.77, 2),
+          resetsAt: "2026-11-14T08:41:35.000Z",
+        }),
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("labels Argon and Carbon quotas apart from the default Gemini quota", () =>
     Effect.gen(function* () {
       const { probe } = yield* fixture({
         summary: {
@@ -500,6 +536,16 @@ describe("Antigravity subscription limits", () => {
                 { bucketId: "gemini-argon-wtu-weekly", window: "weekly", remainingFraction: 0.6 },
               ],
             },
+            {
+              displayName: "Gemini 4 Carbon",
+              buckets: [
+                { bucketId: "gemini-carbon-wtu-weekly", window: "weekly", remainingFraction: 0.4 },
+              ],
+            },
+            {
+              displayName: " ",
+              buckets: [{ bucketId: "gemini-carbon-5h", window: "5h", remainingFraction: 0.8 }],
+            },
           ],
         },
       });
@@ -507,6 +553,8 @@ describe("Antigravity subscription limits", () => {
       const byId = new Map(limits.windows.map((window) => [window.id, window]));
       expect(byId.get("gemini-weekly")?.label).toBe("Gemini · Weekly");
       expect(byId.get("gemini-argon-wtu-weekly")?.label).toBe("Gemini Argon WTU · Weekly");
+      expect(byId.get("gemini-carbon-wtu-weekly")?.label).toBe("Gemini Carbon WTU · Weekly");
+      expect(byId.get("gemini-carbon-5h")?.label).toBe("Gemini Carbon · 5-hour");
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 

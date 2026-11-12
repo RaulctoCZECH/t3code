@@ -15,6 +15,10 @@ import {
   makeUsageLimits,
 } from "@t3tools/provider-core/server/usageLimits";
 
+export function antigravityUserAgent(platform: NodeJS.Platform, architecture: NodeJS.Architecture) {
+  return `antigravity/hub/2.24.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;
+}
+
 // CLI quotas live on daily; the other host reports different allowances for the same account.
 const ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
 const SUMMARY_WINDOW_MINS = new Map([
@@ -138,6 +142,22 @@ function summaryResetTime(
   return untouched ? undefined : bucket.resetTime;
 }
 
+const sha256 = Effect.fnUntraced(function* (text: string) {
+  const digest = yield* (yield* Digest.Digest).digest(
+    Digest.sha256,
+    new TextEncoder().encode(text),
+  );
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+});
+
+/** Keys an account by its Google ID, which matches across machines and hubs; refresh tokens do not. */
+export const antigravityAccountFingerprint = (userInfo: unknown) =>
+  decodeUserInfo(userInfo).pipe(Effect.flatMap((info) => sha256(`google-account\0${info.id}`)));
+
+/** Windows from a `retrieveUserQuotaSummary` answer requested at `requestedAt`. */
+export const antigravitySummaryWindows = (response: unknown, requestedAt: number) =>
+  decodeSummary(response).pipe(Effect.map((summary) => summaryWindows(summary, requestedAt)));
+
 function summaryWindows(summary: typeof Summary.Type, requestedAt: number) {
   const windows = new Map<string, ServerProviderUsageWindow>();
   const groups = summary.groups?.some((group) => group.buckets?.length)
@@ -215,15 +235,6 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
     | undefined;
   let generation = 0;
 
-  const sha256 = (text: string) =>
-    crypto
-      .digest(Digest.sha256, new TextEncoder().encode(text))
-      .pipe(
-        Effect.map((digest) =>
-          Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
-        ),
-      );
-
   const request = (request: HttpClientRequest.HttpClientRequest) =>
     client.execute(request).pipe(
       Effect.provideService(FetchHttpClient.RequestInit, MANUAL_REDIRECT),
@@ -271,8 +282,7 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
           HttpClientRequest.setHeaders({ Authorization: `Bearer ${accessToken}` }),
         ),
       ).pipe(
-        Effect.flatMap(decodeUserInfo),
-        Effect.flatMap((info) => sha256(`google-account\0${info.id}`)),
+        Effect.flatMap(antigravityAccountFingerprint),
         Effect.orElseSucceed(() => fingerprint),
       );
       if (generation === startedGeneration) {
@@ -300,8 +310,7 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
       );
     const requestedAt = yield* Clock.currentTimeMillis;
     const summary = yield* fetchQuota("retrieveUserQuotaSummary").pipe(
-      Effect.flatMap(decodeSummary),
-      Effect.map((summary) => summaryWindows(summary, requestedAt)),
+      Effect.flatMap((response) => antigravitySummaryWindows(response, requestedAt)),
     );
     const windows = summary.length
       ? summary
@@ -319,6 +328,7 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
     return { ...makeUsageLimits({ checkedAt, windows }), credentialFingerprint: account };
   });
   const probe = read.pipe(
+    Effect.provideService(Digest.Digest, crypto),
     Effect.timeout("30 seconds"),
     Effect.catch(() =>
       Effect.gen(function* () {

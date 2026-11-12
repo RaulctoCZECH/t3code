@@ -2,7 +2,7 @@ name: Fork Linux release build
 
 on:
   push:
-    branches: ["build/antigravity-v0.1.0", "update/antigravity-main-**"]
+    branches: ["build/antigravity-v0.1.0", "update/antigravity-**"]
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
       - name: Check production base
-        run: git merge-base --is-ancestor 3fa57b92a238cdd8e079af925b673b2f99618b98 HEAD
+        run: git merge-base --is-ancestor 24e77473ecf41bc1f7142529c7911c1c1aae1d76 HEAD
       - uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
@@ -55,6 +55,7 @@ jobs:
           apps/server/src/provider/acp/AntigravityAcpSupport.test.ts
           apps/server/src/provider/acp/AntigravityProtocol.test.ts
           apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts
+          apps/server/src/usage/cliproxyApi.test.ts
           packages/provider-acp/src/server
           packages/contracts/src/settings.test.ts
           packages/provider-core/src/server/usageLimits.test.ts
