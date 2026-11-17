@@ -102,8 +102,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/cli-resource-monitor/linux-x64"
           cp native/resource-monitor/target/release/t3-resource-monitor "$RUNNER_TEMP/cli-resource-monitor/linux-x64/"
       - name: Build single executable
-        env:
-          VP_NODE_VERSION: "26.12.1"
         run: node apps/server/scripts/cli.ts build-exe --verbose
       - name: Package complete Linux x64 archive
         run: |
