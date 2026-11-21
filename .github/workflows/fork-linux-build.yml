@@ -27,7 +27,7 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
       - name: Check production base
-        run: git merge-base --is-ancestor 7d32075e3757ded707914e2450c3e392a9665765 HEAD
+        run: git merge-base --is-ancestor 59651c1761f6c63e9b6056839067066968e6a406 HEAD
       - uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
